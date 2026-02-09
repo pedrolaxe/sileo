@@ -27,7 +27,7 @@ import "./sileo.css";
 
 const HEIGHT = 40;
 const WIDTH = 350;
-const DEFAULT_ROUNDNESS = 20;
+const DEFAULT_ROUNDNESS = 18;
 const BLUR_RATIO = 0.5;
 const PILL_PADDING = 10;
 const MIN_EXPAND_RATIO = 2.25;
