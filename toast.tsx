@@ -47,6 +47,7 @@ export interface ToastOptions {
 	icon?: ReactNode | null;
 	styles?: ToastStyles;
 	fill?: string;
+	roundness?: number;
 	autopilot?: boolean | { expand?: number; collapse?: number };
 	button?: ToastButton;
 }
@@ -85,9 +86,11 @@ const store = {
 	listeners: new Set<ToastListener>(),
 	position: "top-right" as ToastPosition,
 	options: undefined as Partial<ToastOptions> | undefined,
+
 	emit() {
 		for (const fn of this.listeners) fn(this.toasts);
 	},
+
 	update(fn: (prev: ToastItem[]) => ToastItem[]) {
 		this.toasts = fn(this.toasts);
 		this.emit();
@@ -105,9 +108,11 @@ const timeoutKey = (t: ToastItem) => `${t.id}:${t.instanceId}`;
 const dismissToast = (id: string) => {
 	const item = store.toasts.find((t) => t.id === id);
 	if (!item || item.exiting) return;
+
 	store.update((prev) =>
 		prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)),
 	);
+
 	setTimeout(
 		() => store.update((prev) => prev.filter((t) => t.id !== id)),
 		EXIT_DURATION,
@@ -198,6 +203,7 @@ export const sileo = {
 		createToast({ ...opts, state: "warning" }).id,
 	info: (opts: ToastOptions) => createToast({ ...opts, state: "info" }).id,
 	action: (opts: ToastOptions) => createToast({ ...opts, state: "action" }).id,
+
 	promise: <T,>(
 		promise: Promise<T> | (() => Promise<T>),
 		opts: ToastPromiseOptions<T>,
@@ -230,7 +236,9 @@ export const sileo = {
 
 		return p;
 	},
+
 	dismiss: dismissToast,
+
 	clear: (position?: ToastPosition) =>
 		store.update((prev) =>
 			position ? prev.filter((t) => t.position !== position) : [],
@@ -248,21 +256,47 @@ export function Toaster({
 	const [toasts, setToasts] = useState<ToastItem[]>(store.toasts);
 	const [activeId, setActiveId] = useState<string>();
 
+	// Refs - consolidated
 	const hoverRef = useRef(false);
 	const timersRef = useRef(new Map<string, number>());
 	const listRef = useRef(toasts);
 	const latestRef = useRef<string | undefined>(undefined);
+	const handlersCache = useRef(new Map<string, {
+		enter: MouseEventHandler<HTMLButtonElement>;
+		leave: MouseEventHandler<HTMLButtonElement>;
+	}>());
 
-	const clearAllTimers = useCallback(() => {
-		for (const t of timersRef.current.values()) clearTimeout(t);
-		timersRef.current.clear();
-	}, []);
-
+	// Update store on mount
 	useEffect(() => {
 		store.position = position;
 		store.options = options;
 	}, [position, options]);
 
+	// Memoized callbacks
+	const clearAllTimers = useCallback(() => {
+		for (const t of timersRef.current.values()) clearTimeout(t);
+		timersRef.current.clear();
+	}, []);
+
+	const schedule = useCallback((items: ToastItem[]) => {
+		if (hoverRef.current) return;
+
+		for (const item of items) {
+			if (item.exiting) continue;
+			const key = timeoutKey(item);
+			if (timersRef.current.has(key)) continue;
+
+			const dur = item.duration ?? DEFAULT_DURATION;
+			if (dur === null || dur <= 0) continue;
+
+			timersRef.current.set(
+				key,
+				window.setTimeout(() => dismissToast(item.id), dur),
+			);
+		}
+	}, []);
+
+	// Subscribe to store changes
 	useEffect(() => {
 		const listener: ToastListener = (next) => setToasts(next);
 		store.listeners.add(listener);
@@ -272,50 +306,46 @@ export function Toaster({
 		};
 	}, [clearAllTimers]);
 
-	const schedule = useCallback((items: ToastItem[]) => {
-		if (hoverRef.current) return;
-		for (const item of items) {
-			if (item.exiting) continue;
-			const key = timeoutKey(item);
-			if (timersRef.current.has(key)) continue;
-			const dur = item.duration ?? DEFAULT_DURATION;
-			if (dur === null || dur <= 0) continue;
-			timersRef.current.set(
-				key,
-				window.setTimeout(() => dismissToast(item.id), dur),
-			);
-		}
-	}, []);
-
+	// Manage timers based on toast changes
 	useEffect(() => {
 		listRef.current = toasts;
+
 		// Clean up timers for removed toasts
+		const toastKeys = new Set(toasts.map(timeoutKey));
 		for (const [key, timer] of timersRef.current) {
-			if (!toasts.some((t) => timeoutKey(t) === key)) {
+			if (!toastKeys.has(key)) {
 				clearTimeout(timer);
 				timersRef.current.delete(key);
 			}
 		}
+
 		schedule(toasts);
 	}, [toasts, schedule]);
 
-	const handleMouseEnter: MouseEventHandler<HTMLButtonElement> =
-		useCallback(() => {
-			if (hoverRef.current) return;
-			hoverRef.current = true;
-			clearAllTimers();
-		}, [clearAllTimers]);
+	// Stable handler refs
+	const handleMouseEnterRef = useRef<MouseEventHandler<HTMLButtonElement>>();
+	const handleMouseLeaveRef = useRef<MouseEventHandler<HTMLButtonElement>>();
 
-	const handleMouseLeave: MouseEventHandler<HTMLButtonElement> =
-		useCallback(() => {
-			if (!hoverRef.current) return;
-			hoverRef.current = false;
-			schedule(listRef.current);
-		}, [schedule]);
+	const handleMouseEnter = useCallback<MouseEventHandler<HTMLButtonElement>>(() => {
+		if (hoverRef.current) return;
+		hoverRef.current = true;
+		clearAllTimers();
+	}, [clearAllTimers]);
 
+	const handleMouseLeave = useCallback<MouseEventHandler<HTMLButtonElement>>(() => {
+		if (!hoverRef.current) return;
+		hoverRef.current = false;
+		schedule(listRef.current);
+	}, [schedule]);
+
+	handleMouseEnterRef.current = handleMouseEnter;
+	handleMouseLeaveRef.current = handleMouseLeave;
+
+	// Get latest toast ID
 	const latest = useMemo(() => {
-		for (let i = toasts.length - 1; i >= 0; i--)
+		for (let i = toasts.length - 1; i >= 0; i--) {
 			if (!toasts[i].exiting) return toasts[i].id;
+		}
 		return undefined;
 	}, [toasts]);
 
@@ -324,69 +354,65 @@ export function Toaster({
 		setActiveId(latest);
 	}, [latest]);
 
-	const getViewportStyle = useCallback(
-		(pos: ToastPosition): CSSProperties | undefined => {
-			if (offset === undefined) return undefined;
-			const o =
-				typeof offset === "object"
-					? offset
-					: { top: offset, right: offset, bottom: offset, left: offset };
-			const s: CSSProperties = {};
-			const px = (v: ToasterOffsetValue) =>
-				typeof v === "number" ? `${v}px` : v;
-			if (pos.startsWith("top") && o.top) s.top = px(o.top);
-			if (pos.startsWith("bottom") && o.bottom) s.bottom = px(o.bottom);
-			if (pos.endsWith("left") && o.left) s.left = px(o.left);
-			if (pos.endsWith("right") && o.right) s.right = px(o.right);
-			return s;
-		},
-		[offset],
-	);
-
-	const byPosition = useMemo(() => {
-		const map = {} as Partial<Record<ToastPosition, ToastItem[]>>;
-		for (const t of toasts) {
-			const pos = t.position ?? position;
-			if (!map[pos]) map[pos] = [];
-			map[pos].push(t);
-		}
-		return map;
-	}, [toasts, position]);
-
-	const handlersCache = useRef(
-		new Map<
-			string,
-			{
-				enter: MouseEventHandler<HTMLButtonElement>;
-				leave: MouseEventHandler<HTMLButtonElement>;
-			}
-		>(),
-	);
-
-	// Keep handler deps fresh via refs so cached closures never go stale
-	const handleMouseEnterRef = useRef(handleMouseEnter);
-	handleMouseEnterRef.current = handleMouseEnter;
-	const handleMouseLeaveRef = useRef(handleMouseLeave);
-	handleMouseLeaveRef.current = handleMouseLeave;
-
+	// Get handlers for a toast - cached to prevent recreating
 	const getHandlers = useCallback((toastId: string) => {
 		let cached = handlersCache.current.get(toastId);
 		if (cached) return cached;
+
 		cached = {
 			enter: ((e) => {
 				setActiveId((prev) => (prev === toastId ? prev : toastId));
-				handleMouseEnterRef.current(e);
+				handleMouseEnterRef.current?.(e);
 			}) as MouseEventHandler<HTMLButtonElement>,
 			leave: ((e) => {
 				setActiveId((prev) =>
 					prev === latestRef.current ? prev : latestRef.current,
 				);
-				handleMouseLeaveRef.current(e);
+				handleMouseLeaveRef.current?.(e);
 			}) as MouseEventHandler<HTMLButtonElement>,
 		};
+
 		handlersCache.current.set(toastId, cached);
 		return cached;
 	}, []);
+
+	// Viewport style computation - memoized
+	const getViewportStyle = useCallback(
+		(pos: ToastPosition): CSSProperties | undefined => {
+			if (offset === undefined) return undefined;
+
+			const o = typeof offset === "object"
+				? offset
+				: { top: offset, right: offset, bottom: offset, left: offset };
+
+			const s: CSSProperties = {};
+			const px = (v: ToasterOffsetValue) =>
+				typeof v === "number" ? `${v}px` : v;
+
+			if (pos.startsWith("top") && o.top) s.top = px(o.top);
+			if (pos.startsWith("bottom") && o.bottom) s.bottom = px(o.bottom);
+			if (pos.endsWith("left") && o.left) s.left = px(o.left);
+			if (pos.endsWith("right") && o.right) s.right = px(o.right);
+
+			return s;
+		},
+		[offset],
+	);
+
+	// Group toasts by position - optimized
+	const byPosition = useMemo(() => {
+		const map = {} as Partial<Record<ToastPosition, ToastItem[]>>;
+		for (const t of toasts) {
+			const pos = t.position ?? position;
+			const arr = map[pos];
+			if (arr) {
+				arr.push(t);
+			} else {
+				map[pos] = [t];
+			}
+		}
+		return map;
+	}, [toasts, position]);
 
 	return (
 		<>
@@ -394,12 +420,14 @@ export function Toaster({
 			{TOAST_POSITIONS.map((pos) => {
 				const items = byPosition[pos];
 				if (!items?.length) return null;
+
 				const pill = pos.includes("right")
 					? "right"
 					: pos.includes("center")
 						? "center"
 						: "left";
 				const expand = pos.startsWith("top") ? "bottom" : "top";
+
 				return (
 					<section
 						key={pos}
@@ -423,6 +451,7 @@ export function Toaster({
 									fill={item.fill}
 									styles={item.styles}
 									button={item.button}
+									roundness={item.roundness}
 									exiting={item.exiting}
 									autoExpandDelayMs={item.autoExpandDelayMs}
 									autoCollapseDelayMs={item.autoCollapseDelayMs}

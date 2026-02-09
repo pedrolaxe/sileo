@@ -8,7 +8,6 @@ import {
 	LoaderCircleIcon,
 	XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import {
 	type CSSProperties,
 	type MouseEventHandler,
@@ -28,11 +27,12 @@ import "./sileo.css";
 
 const HEIGHT = 40;
 const WIDTH = 350;
-const SPRING = { type: "spring" as const, bounce: 0.15, duration: 0.5 };
-const RADIUS = HEIGHT / 2 - 4;
-const PILL_PADDING = HEIGHT / 4;
+const DEFAULT_ROUNDNESS = 20;
+const BLUR_RATIO = 0.5;
+const PILL_PADDING = 10;
 const MIN_EXPAND_RATIO = 2.25;
 const SWAP_COLLAPSE_MS = 200;
+const HEADER_EXIT_MS = 150;
 
 type State = "success" | "loading" | "error" | "warning" | "info" | "action";
 export type SileoState = State;
@@ -71,6 +71,7 @@ interface SileoProps {
 	icon?: ReactNode | null;
 	styles?: SileoStyles;
 	button?: SileoButton;
+	roundness?: number;
 	exiting?: boolean;
 	autoExpandDelayMs?: number;
 	autoCollapseDelayMs?: number;
@@ -99,7 +100,13 @@ const STATE_ICON: Record<State, ReactNode> = {
    React from diffing the filter node tree on every toast state update.
    `color-interpolation-filters="sRGB"` avoids the default linearRGB
    conversion which doubles the work (gamma encode → blur → decode). */
-const GooeyDefs = memo(function GooeyDefs({ filterId }: { filterId: string }) {
+const GooeyDefs = memo(function GooeyDefs({
+	filterId,
+	blur,
+}: {
+	filterId: string;
+	blur: number;
+}) {
 	return (
 		<defs>
 			<filter
@@ -110,11 +117,11 @@ const GooeyDefs = memo(function GooeyDefs({ filterId }: { filterId: string }) {
 				height="140%"
 				colorInterpolationFilters="sRGB"
 			>
-				<feGaussianBlur in="SourceGraphic" stdDeviation={10} result="blur" />
+				<feGaussianBlur in="SourceGraphic" stdDeviation={blur} result="blur" />
 				<feColorMatrix
 					in="blur"
 					mode="matrix"
-					values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 50 -25"
+					values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -10"
 					result="goo"
 				/>
 				<feComposite in="SourceGraphic" in2="goo" operator="atop" />
@@ -122,16 +129,6 @@ const GooeyDefs = memo(function GooeyDefs({ filterId }: { filterId: string }) {
 		</defs>
 	);
 });
-
-/* ----------------------------- Motion Configs ----------------------------- */
-
-const HEADER_BLUR = { opacity: 0, filter: "blur(4px)" };
-const HEADER_ANIMATE = {
-	opacity: 1,
-	filter: "blur(0px)",
-	transition: { ...SPRING, duration: 1 },
-};
-const HEADER_EXIT = { ...HEADER_BLUR, transition: { duration: 0.15 } };
 
 /* ------------------------------- Component -------------------------------- */
 
@@ -147,6 +144,7 @@ export const Sileo = memo(function Sileo({
 	icon,
 	styles,
 	button,
+	roundness,
 	exiting = false,
 	autoExpandDelayMs,
 	autoCollapseDelayMs,
@@ -179,14 +177,21 @@ export const Sileo = memo(function Sileo({
 
 	// Unique filter ID per toast instance to prevent SVG filter collisions
 	const filterId = `sileo-gooey-${id}`;
+	const resolvedRoundness = Math.max(0, roundness ?? DEFAULT_ROUNDNESS);
+	const blur = resolvedRoundness * BLUR_RATIO;
 
 	const headerRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
+	const headerExitRef = useRef<number | null>(null);
 	const autoExpandRef = useRef<number | null>(null);
 	const autoCollapseRef = useRef<number | null>(null);
 	const swapTimerRef = useRef<number | null>(null);
 	const lastRefreshKeyRef = useRef(refreshKey);
 	const pendingRef = useRef<{ key?: string; payload: View } | null>(null);
+	const [headerLayer, setHeaderLayer] = useState<{
+		current: { key: string; view: View };
+		prev: { key: string; view: View } | null;
+	}>({ current: { key: headerKey, view }, prev: null });
 
 	/* ------------------------------ Measurements ------------------------------ */
 
@@ -215,7 +220,7 @@ export const Sileo = memo(function Sileo({
 		const ro = new ResizeObserver(measure);
 		ro.observe(el);
 		return () => ro.disconnect();
-	}, [headerKey]);
+	}, [headerLayer.current.key]);
 
 	useLayoutEffect(() => {
 		if (!hasDesc) {
@@ -238,6 +243,36 @@ export const Sileo = memo(function Sileo({
 		const raf = requestAnimationFrame(() => setReady(true));
 		return () => cancelAnimationFrame(raf);
 	}, []);
+
+	useLayoutEffect(() => {
+		setHeaderLayer((state) => {
+			if (state.current.key === headerKey) {
+				if (state.current.view === view) return state;
+				return { ...state, current: { key: headerKey, view } };
+			}
+			return {
+				prev: state.current,
+				current: { key: headerKey, view },
+			};
+		});
+	}, [headerKey, view]);
+
+	useEffect(() => {
+		if (!headerLayer.prev) return;
+		if (headerExitRef.current) {
+			clearTimeout(headerExitRef.current);
+		}
+		headerExitRef.current = window.setTimeout(() => {
+			headerExitRef.current = null;
+			setHeaderLayer((state) => ({ ...state, prev: null }));
+		}, HEADER_EXIT_MS);
+		return () => {
+			if (headerExitRef.current) {
+				clearTimeout(headerExitRef.current);
+				headerExitRef.current = null;
+			}
+		};
+	}, [headerLayer.prev]);
 
 	/* ----------------------------- Refresh logic ------------------------------ */
 
@@ -327,9 +362,10 @@ export const Sileo = memo(function Sileo({
 	/* ------------------------------ Derived values ---------------------------- */
 
 	const minExpanded = HEIGHT * MIN_EXPAND_RATIO;
+	// Use minExpanded for all toasts to ensure consistent scaling/roundness
 	const rawExpanded = hasDesc
 		? Math.max(minExpanded, HEIGHT + contentHeight)
-		: HEIGHT;
+		: minExpanded;
 
 	// Freeze the expanded height while collapsed so a mid-transition content
 	// swap doesn't cause the pill height to jump and produce a double-spring.
@@ -342,10 +378,7 @@ export const Sileo = memo(function Sileo({
 	const expanded = open ? rawExpanded : frozenExpandedRef.current;
 	const svgHeight = hasDesc ? Math.max(expanded, minExpanded) : HEIGHT;
 	const expandedContent = Math.max(0, expanded - HEIGHT);
-	const resolvedPillWidth = Math.max(
-		pillWidth === 0 && position === "right" ? WIDTH : pillWidth,
-		HEIGHT,
-	);
+	const resolvedPillWidth = Math.max(pillWidth || HEIGHT, HEIGHT);
 
 	const pillX =
 		position === "right"
@@ -355,25 +388,24 @@ export const Sileo = memo(function Sileo({
 				: 0;
 
 	/* ------------------------------- Inline styles ---------------------------- */
-	// Memoised so React skips DOM writes when deps haven't changed.
 
-	const buttonStyle = useMemo<CSSProperties>(
+	const viewport = useMemo<CSSProperties>(
 		() => ({ height: open ? expanded : HEIGHT }),
 		[open, expanded],
 	);
-	const pillStyle = useMemo<CSSProperties>(
+	const pill = useMemo<CSSProperties>(
 		() => ({
 			transform: `scaleY(${open ? 1 : HEIGHT / expanded})`,
 			width: resolvedPillWidth,
-			height: open ? expanded - 5 : expanded,
+			height: expanded,
 		}),
 		[open, expanded, resolvedPillWidth],
 	);
-	const bodyStyle = useMemo<CSSProperties>(
+	const body = useMemo<CSSProperties>(
 		() => ({ transform: `scaleY(${open ? 1 : 0})`, opacity: open ? 1 : 0 }),
 		[open],
 	);
-	const headerStyle = useMemo(
+	const header = useMemo(
 		() => ({
 			left: pillX,
 			transform: `translateY(${open ? (expand === "bottom" ? 3 : -3) : 0}px) scale(${open ? 0.9 : 1})`,
@@ -437,7 +469,7 @@ export const Sileo = memo(function Sileo({
 			data-position={position}
 			data-state={view.state}
 			className={className}
-			style={buttonStyle}
+			style={viewport}
 			onMouseEnter={handleEnter}
 			onMouseLeave={handleLeave}
 			onTransitionEnd={handleTransitionEnd}
@@ -451,65 +483,82 @@ export const Sileo = memo(function Sileo({
 					viewBox={`0 0 ${WIDTH} ${svgHeight}`}
 				>
 					<title>Sileo Notification</title>
-					<GooeyDefs filterId={filterId} />
+					<GooeyDefs filterId={filterId} blur={blur} />
 					<g filter={`url(#${filterId})`}>
 						<rect
 							data-sileo-pill
 							x={pillX}
-							rx={RADIUS}
-							ry={RADIUS}
+							rx={resolvedRoundness}
+							ry={resolvedRoundness}
 							fill={view.fill}
-							style={pillStyle}
+							style={pill}
 						/>
 						<rect
 							data-sileo-body
 							y={HEIGHT}
 							width={WIDTH}
 							height={expandedContent}
-							rx={RADIUS}
-							ry={RADIUS}
+							rx={resolvedRoundness}
+							ry={resolvedRoundness}
 							fill={view.fill}
-							style={bodyStyle}
+							style={body}
 						/>
 					</g>
 				</svg>
 			</div>
 
 			{/* Header with morphing content */}
-			<div
-				ref={headerRef}
-				data-sileo-header
-				data-edge={expand}
-				style={headerStyle}
-			>
-				<AnimatePresence mode="popLayout" initial={false}>
-					<motion.div
+			<div ref={headerRef} data-sileo-header data-edge={expand} style={header}>
+				<div data-sileo-header-stack>
+					<div
 						ref={innerRef}
-						key={headerKey}
+						key={headerLayer.current.key}
 						data-sileo-header-inner
-						initial={HEADER_BLUR}
-						animate={HEADER_ANIMATE}
-						exit={HEADER_EXIT}
+						data-layer="current"
 					>
 						<div
 							data-sileo-badge
-							data-state={view.state}
-							className={view.styles?.badge}
+							data-state={headerLayer.current.view.state}
+							className={headerLayer.current.view.styles?.badge}
 						>
-							{view.icon ?? STATE_ICON[view.state]}
+							{headerLayer.current.view.icon ??
+								STATE_ICON[headerLayer.current.view.state]}
 						</div>
 						<span
 							data-sileo-title
-							data-state={view.state}
-							className={view.styles?.title}
+							data-state={headerLayer.current.view.state}
+							className={headerLayer.current.view.styles?.title}
 						>
-							{view.title}
+							{headerLayer.current.view.title}
 						</span>
-					</motion.div>
-				</AnimatePresence>
+					</div>
+					{headerLayer.prev && (
+						<div
+							key={headerLayer.prev.key}
+							data-sileo-header-inner
+							data-layer="prev"
+							data-exiting="true"
+						>
+							<div
+								data-sileo-badge
+								data-state={headerLayer.prev.view.state}
+								className={headerLayer.prev.view.styles?.badge}
+							>
+								{headerLayer.prev.view.icon ??
+									STATE_ICON[headerLayer.prev.view.state]}
+							</div>
+							<span
+								data-sileo-title
+								data-state={headerLayer.prev.view.state}
+								className={headerLayer.prev.view.styles?.title}
+							>
+								{headerLayer.prev.view.title}
+							</span>
+						</div>
+					)}
+				</div>
 			</div>
 
-			{/* Content */}
 			{hasDesc && (
 				<div
 					data-sileo-content
@@ -524,12 +573,12 @@ export const Sileo = memo(function Sileo({
 					>
 						{view.description}
 						{view.button && (
-							// biome-ignore lint/a11y/useValidAnchor: nested inside outer <button>, native <button> is invalid here
+							// biome-ignore lint/a11y/useValidAnchor: Button is nested inside outer <button>
 							<a
+								href="#"
 								data-sileo-button
 								data-state={view.state}
 								className={view.styles?.button}
-								href="#"
 								onClick={(e) => {
 									e.preventDefault();
 									e.stopPropagation();

@@ -9,6 +9,7 @@
 	],
 	"exports": {
 		".": "./index.ts",
+		"./sileo": "./sileo.tsx",
 		"./sileo.css": "./sileo.css",
 		"./toast": "./toast.tsx"
 	},
