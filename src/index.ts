@@ -1,6 +1,6 @@
 "use client";
 
-import "./sileo.css";
+import "./styles.css";
 
 export { sileo, Toaster } from "./toast";
 export type {

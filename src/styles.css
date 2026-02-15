@@ -158,9 +158,7 @@
 	transition:
 		transform var(--sileo-duration) var(--sileo-spring-easing),
 		width var(--sileo-duration) var(--sileo-spring-easing),
-		height var(--sileo-duration) var(--sileo-spring-easing),
-		x var(--sileo-duration) var(--sileo-spring-easing),
-		fill var(--sileo-duration) var(--sileo-spring-easing);
+		x var(--sileo-duration) var(--sileo-spring-easing);
 }
 
 [data-sileo-toast][data-ready="true"][data-expanded="true"] [data-sileo-pill] {
@@ -170,8 +168,7 @@
 [data-sileo-toast][data-ready="true"] [data-sileo-body] {
 	transition:
 		transform var(--sileo-duration) var(--sileo-spring-easing),
-		opacity var(--sileo-duration) var(--sileo-spring-easing),
-		fill var(--sileo-duration) var(--sileo-spring-easing);
+		opacity var(--sileo-duration) var(--sileo-spring-easing);
 }
 
 /* --------------------------------- Header --------------------------------- */

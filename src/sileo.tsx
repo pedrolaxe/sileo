@@ -12,7 +12,7 @@ import {
 	useState,
 } from "react";
 import type { SileoButton, SileoState, SileoStyles } from "./types";
-import "./sileo.css";
+import "./styles.css";
 import {
 	ArrowRight,
 	Check,
@@ -368,6 +368,7 @@ export const Sileo = memo(function Sileo({
 	const svgHeight = hasDesc ? Math.max(expanded, minExpanded) : HEIGHT;
 	const expandedContent = Math.max(0, expanded - HEIGHT);
 	const resolvedPillWidth = Math.max(pillWidth || HEIGHT, HEIGHT);
+	const pillHeight = HEIGHT + blur * 3;
 
 	const pillX =
 		position === "right"
@@ -383,13 +384,13 @@ export const Sileo = memo(function Sileo({
 			"--_h": `${open ? expanded : HEIGHT}px`,
 			"--_pw": `${resolvedPillWidth}px`,
 			"--_px": `${pillX}px`,
-			"--_sy": `${open ? 1 : HEIGHT / expanded}`,
-			"--_ph": `${open ? expanded - 5 : expanded}px`,
+			"--_sy": `${open ? 1 : HEIGHT / pillHeight}`,
+			"--_ph": `${pillHeight}px`,
 			"--_by": `${open ? 1 : 0}`,
 			"--_ht": `translateY(${open ? (expand === "bottom" ? 3 : -3) : 0}px) scale(${open ? 0.9 : 1})`,
 			"--_co": `${open ? 1 : 0}`,
 		}),
-		[open, expanded, resolvedPillWidth, pillX, expand],
+		[open, expanded, resolvedPillWidth, pillX, expand, pillHeight],
 	);
 
 	/* -------------------------------- Handlers -------------------------------- */

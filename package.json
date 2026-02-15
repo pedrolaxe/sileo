@@ -1,6 +1,6 @@
 {
 	"name": "sileo",
-	"version": "0.0.8",
+	"version": "0.0.9",
 	"description": "An opinionated, physics based toast notification library for react.",
 	"license": "MIT",
 	"repository": {
@@ -19,7 +19,7 @@
 			},
 			"default": "./dist/index.js"
 		},
-		"./dist/styles.css": "./dist/styles.css"
+		"./styles.css": "./dist/styles.css"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -27,13 +27,12 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "rm -rf dist && bunchee && cp src/sileo.css dist/styles.css",
+		"build": "rm -rf dist && bunchee && cp src/styles.css dist/styles.css",
 		"dev": "bunchee --watch"
 	},
 	"peerDependencies": {
 		"react": ">=18",
-		"react-dom": ">=18",
-		"lucide-react": ">=0.300"
+		"react-dom": ">=18"
 	},
 	"devDependencies": {
 		"bunchee": "^6.9.4"
