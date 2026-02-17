@@ -545,7 +545,6 @@ export const Sileo = memo(function Sileo({
 			const target = e.target as HTMLElement;
 			if (target.closest("[data-sileo-button]")) return;
 			
-			// Se dismiss estiver habilitado, fecha o toast ao clicar
 			if (dismiss) {
 				onDismiss();
 				return;
